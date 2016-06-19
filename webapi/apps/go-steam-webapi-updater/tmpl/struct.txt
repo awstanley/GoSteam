@@ -1,0 +1,2 @@
+// {{ .method }} represents an object capable of calling
+// {{ .uri }} on the SteamAPI.

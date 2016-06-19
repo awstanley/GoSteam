@@ -1,0 +1,6 @@
+// Call creates a query from {{ .method }}, and subsequently calls it
+// using the {{ .verb }} method type.
+//
+// This is {{ .uri }} of the SteamAPI.
+func (method *{{ .method}}) Call(conn *core.Connection) (contents []byte, err error) {
+	params := core.NewParameters()
