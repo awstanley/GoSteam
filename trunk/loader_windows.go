@@ -42,10 +42,23 @@ var (
 	// Init
 	pSteamApiInit = pSteamLibrary.NewProc("SteamAPI_Init")
 
+	// SteamApps
 	pSteamApps = pSteamLibrary.NewProc("SteamApps")
 
 	// GetappInstallDir (why we're here at the moment)
-	pSteamApiISteamAppsGetAppInstallDir = pSteamLibrary.NewProc("SteamAPI_ISteamApps_GetAppInstallDir")
+	pSteamAppsGetAppInstallDir = pSteamLibrary.NewProc("SteamAPI_ISteamApps_GetAppInstallDir")
+
+	// SteamFriends
+	pSteamFriends = pSteamLibrary.NewProc("SteamFriends")
+
+	// Gets the persona name
+	pISteamGetPersonaName = pSteamLibrary.NewProc("SteamAPI_ISteamFriends_GetPersonaName")
+
+	// SteamApps
+	pSteamUser = pSteamLibrary.NewProc("SteamUser")
+
+	// SteamUser
+	pSteamUserGetSteamID = pSteamLibrary.NewProc("SteamAPI_ISteamUser_GetSteamID")
 )
 
 var stringBufferSize = 32 * 1024
@@ -59,33 +72,109 @@ func steamApiInit() bool {
 // GetAppInstallDir returns the application directory (or "")
 func GetAppInstallDir() string {
 
+	// Gets the "SteamApps" instance.
 	ptr, _, _ := pSteamApps.Call()
 
+	// Fails if it's nil/null (0)
 	if ptr == 0 {
 		log.Println("Failed on call to SteamApps() [pid is %p]\n", ptr)
 		return ""
 	}
 
-	// Get AppId
+	// Gets the AppId (previously set)
 	var appId uint32
 	fmt.Sscanf(os.Getenv("SteamAppId"), "%d", &appId)
 
+	// Fails if it nil/null (0)
 	if appId == 0 {
 		log.Println("Failed to get AppID from env\n")
 		return ""
 	}
 
-	// Allocate buffer
+	// Allocates a HUGE string buffer to hold the path,
+	// to handle the really weird cases people have.
 	buf := make([]byte, stringBufferSize)
-	r1, _, _ := pSteamApiISteamAppsGetAppInstallDir.Call(ptr,
+
+	// Calls the Steamworks "GetAppInstallDir" with the given App.
+	r1, _, _ := pSteamAppsGetAppInstallDir.Call(ptr,
 		uintptr(appId),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(stringBufferSize),
 	)
 
-	// Create the string
+	// Turns the buffer into a string of the path
 	str := string(buf[0 : uint32(r1)-1])
 
-	// Return it
+	// Returns the path
 	return str
+}
+
+// GetSteamID64 returns the 64-bit SteamID of the current user.
+// This can be used to handle a few different cases (e.g. userdata)
+func GetSteamID64() uint64 {
+
+	// Gets the SteamUser
+	ptr, _, _ := pSteamUser.Call()
+
+	// Fail if it's nil/null/0
+	if ptr == 0 {
+		log.Println("Failed on call to SteamUser() [pid is %p]\n", ptr)
+		return 0
+	}
+
+	// Get AppId from the environment
+	var appId uint32
+	fmt.Sscanf(os.Getenv("SteamAppId"), "%d", &appId)
+
+	// Fail if it's nil/null/0
+	if appId == 0 {
+		log.Println("Failed to get AppID from env\n")
+		return 0
+	}
+
+	// Make the call (this one's easy)
+	r1, _, _ := pSteamUserGetSteamID.Call(ptr)
+
+	// Return it
+	return uint64(r1)
+}
+
+// GetPersonaName returns the current "friends" name
+func GetPersonaName() string {
+
+	// Gets the "SteamFriends" instance.
+	ptr, _, _ := pSteamFriends.Call()
+
+	// Fails if it's nil/null (0)
+	if ptr == 0 {
+		log.Println("Failed on call to SteamFriends() [pid is %p]\n", ptr)
+		return ""
+	}
+
+	// Gets the AppId (previously set)
+	var appId uint32
+	fmt.Sscanf(os.Getenv("SteamAppId"), "%d", &appId)
+
+	// Fails if it nil/null (0)
+	if appId == 0 {
+		log.Println("Failed to get AppID from env\n")
+		return ""
+	}
+
+	// Gets the name (as a string)
+	r1, _, _ := pISteamGetPersonaName.Call(ptr)
+
+	// Copy it to a byte array
+	buf := (*[unsafe.Sizeof(r1) - 1]byte)(unsafe.Pointer(r1))[:]
+
+	// Strip the weird null pointers off the end.
+	var i int
+	for i = len(buf) - 1; i > 0; i-- {
+		if buf[i] == 0x00 {
+			break
+		}
+	}
+
+	// Cast to string and then return
+	return string(buf[0:i])
 }
