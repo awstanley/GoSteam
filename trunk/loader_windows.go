@@ -42,6 +42,27 @@ var (
 	// Init
 	pSteamApiInit = pSteamLibrary.NewProc("SteamAPI_Init")
 
+	// Shutdown
+	pSteamApiShutdown = pSteamLibrary.NewProc("SteamAPI_Shutdown")
+
+	// GetHSteamPipe
+	pSteamApiGetHSteamPipe = pSteamLibrary.NewProc("SteamAPI_GetHSteamPipe")
+
+	// GetHSteamUser
+	pSteamApiGetHSteamUser = pSteamLibrary.NewProc("SteamAPI_GetHSteamUser")
+
+	// SteamClient
+	pSteamClient = pSteamLibrary.NewProc("SteamClient")
+
+	// ReleaseUser
+	pSteamClientReleaseUser = pSteamLibrary.NewProc("SteamAPI_ISteamClient_ReleaseUser")
+
+	// BReleaseSteamPipe
+	pSteamClientBReleaseSteamPipe = pSteamLibrary.NewProc("SteamAPI_ISteamClient_BReleaseSteamPipe")
+
+	// BShutdownIfAllPipesClosed
+	pSteamClientBShutdownIfAllPipesClosed = pSteamLibrary.NewProc("SteamAPI_ISteamClient_BShutdownIfAllPipesClosed")
+
 	// SteamApps
 	pSteamApps = pSteamLibrary.NewProc("SteamApps")
 
@@ -52,13 +73,16 @@ var (
 	pSteamFriends = pSteamLibrary.NewProc("SteamFriends")
 
 	// Gets the persona name
-	pISteamGetPersonaName = pSteamLibrary.NewProc("SteamAPI_ISteamFriends_GetPersonaName")
+	pSteamGetPersonaName = pSteamLibrary.NewProc("SteamAPI_ISteamFriends_GetPersonaName")
 
 	// SteamApps
 	pSteamUser = pSteamLibrary.NewProc("SteamUser")
 
 	// SteamUser
 	pSteamUserGetSteamID = pSteamLibrary.NewProc("SteamAPI_ISteamUser_GetSteamID")
+
+	// AuthSessionTicket
+	pSteamUserGetAuthSessionTicket = pSteamLibrary.NewProc("SteamAPI_ISteamUser_GetAuthSessionTicket")
 )
 
 var stringBufferSize = 32 * 1024
@@ -77,7 +101,7 @@ func GetAppInstallDir() string {
 
 	// Fails if it's nil/null (0)
 	if ptr == 0 {
-		log.Println("Failed on call to SteamApps() [pid is %p]\n", ptr)
+		log.Printf("Failed on call to SteamApps() [pid is %p]\n", ptr)
 		return ""
 	}
 
@@ -96,7 +120,8 @@ func GetAppInstallDir() string {
 	buf := make([]byte, stringBufferSize)
 
 	// Calls the Steamworks "GetAppInstallDir" with the given App.
-	r1, _, _ := pSteamAppsGetAppInstallDir.Call(ptr,
+	r1, _, _ := pSteamAppsGetAppInstallDir.Call(
+		ptr,
 		uintptr(appId),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(stringBufferSize),
@@ -118,7 +143,7 @@ func GetSteamID64() uint64 {
 
 	// Fail if it's nil/null/0
 	if ptr == 0 {
-		log.Println("Failed on call to SteamUser() [pid is %p]\n", ptr)
+		log.Printf("Failed on call to SteamUser() [pid is %p]\n", ptr)
 		return 0
 	}
 
@@ -147,7 +172,7 @@ func GetPersonaName() string {
 
 	// Fails if it's nil/null (0)
 	if ptr == 0 {
-		log.Println("Failed on call to SteamFriends() [pid is %p]\n", ptr)
+		log.Printf("Failed on call to SteamFriends() [pid is %p]\n", ptr)
 		return ""
 	}
 
@@ -162,7 +187,7 @@ func GetPersonaName() string {
 	}
 
 	// Gets the name (as a string)
-	r1, _, _ := pISteamGetPersonaName.Call(ptr)
+	r1, _, _ := pSteamGetPersonaName.Call(ptr)
 
 	// Copy it to a byte array
 	buf := (*[unsafe.Sizeof(r1) - 1]byte)(unsafe.Pointer(r1))[:]
@@ -177,4 +202,75 @@ func GetPersonaName() string {
 
 	// Cast to string and then return
 	return string(buf[0:i])
+}
+
+// GetAuthSessionTicket gets an AuthSessionTicket for the current application;
+// this is mostly useful in client simulation and other systems. You typically
+// only want this in development of things, or for when the publisher has gated
+// news updates behind the client.
+//
+// pTicket is a valid ticket; convert this to hex using encoding/hex's
+// hex.EncodeToString (or don't if your application doesn't need it).
+func GetAuthSessionTicket() (hAuthTicket uint32, pTicket []byte) {
+	// Gets the SteamUser
+	instancePtr, _, _ := pSteamUser.Call()
+
+	// Fail if it's nil/null/0
+	if instancePtr == 0 {
+		log.Printf("Failed on call to SteamUser() [pid is %p]\n", instancePtr)
+		return 0, nil
+	}
+
+	// Setup the variables
+	pTicket = make([]byte, 4096) // buffer (void*)
+	cbMaxTicket := 4096          // int
+	var pcbTicket uint32         // uint32
+
+	// Make the call (this one's harder)
+	r1, _, _ := pSteamUserGetAuthSessionTicket.Call(
+		instancePtr,                          // instance (SteamUser)
+		uintptr(unsafe.Pointer(&pTicket[0])), // pTicket
+		uintptr(cbMaxTicket),                 // cbMaxTicket (largest size the ticket can be)
+		uintptr(unsafe.Pointer(&pcbTicket)),  // Pointer to max size
+	)
+
+	// Return it
+	return uint32(r1), pTicket[0:pcbTicket]
+}
+
+// AttemptShutdown attempts to close the Steam connection.
+//
+// Incomplete -- not ready for primetime (as it doesn't work);
+// there's probably no good way to do this (there used to be).
+//
+// May have to go back to manually initialising Steam via pipe calls
+// and building our own Context (yay).
+func AttemptShutdown() {
+	// Gets the SteamClient
+	instancePtr, _, _ := pSteamClient.Call()
+
+	// Fail if it's nil/null/0
+	if instancePtr == 0 {
+		log.Printf("Failed on call to SteamClient() [pid is %p]\n", instancePtr)
+		return
+	}
+
+	pipeID, _, _ := pSteamApiGetHSteamPipe.Call()
+	println("pipe", pipeID)
+
+	userID, _, _ := pSteamApiGetHSteamUser.Call()
+	println("user", userID)
+
+	pSteamClientReleaseUser.Call(instancePtr, pipeID, userID)
+
+	pSteamClientBReleaseSteamPipe.Call(
+		instancePtr, // instance (SteamClient)
+		pipeID,      // pipe
+	)
+
+	// Make the call (this one's harder)
+	pSteamClientBShutdownIfAllPipesClosed.Call(
+		instancePtr, // instance (SteamClient)
+	)
+	pSteamApiShutdown.Call()
 }
